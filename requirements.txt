@@ -1,0 +1,6 @@
+# Packages for running the API and its tests, pinned to validated versions.
+fastapi==0.142.2
+pydantic==2.13.5
+uvicorn==0.54.0
+# HTTPX is used by FastAPI TestClient in test_api.py.
+httpx==0.28.1
