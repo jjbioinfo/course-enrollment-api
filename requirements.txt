@@ -1,6 +1,7 @@
-# Packages for running the API and its tests, pinned to validated versions.
+# Application and tests use this one dependency file.
 fastapi==0.142.2
 pydantic==2.13.5
+supabase==2.32.0
+python-dotenv==1.2.4
 uvicorn==0.54.0
-# HTTPX is used by FastAPI TestClient in test_api.py.
 httpx==0.28.1

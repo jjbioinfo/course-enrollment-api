@@ -1,12 +1,9 @@
-# Local environments, caches, editor files, secrets, and generated logs.
+.env
+.env.*
+!.env.example
 .venv/
-venv/
 __pycache__/
 *.py[cod]
 .pytest_cache/
-.env
-.env.*
 *.log
 .DS_Store
-.vscode/
-.idea/

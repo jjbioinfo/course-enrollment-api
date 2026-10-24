@@ -1,321 +1,152 @@
 # Course Enrollment API
 
-A FastAPI application that allows students to enroll in courses. It provides
-endpoints for creating and listing courses, enrolling students, viewing a
-student's courses, and cancelling enrollments. Duplicate enrollments are
-rejected, and missing records return meaningful HTTP errors.
+A small FastAPI application backed by Supabase PostgreSQL. Students can enroll in courses, view their courses, and cancel an enrollment. A database constraint prevents the same student from enrolling in the same course twice.
 
-## Features
+## Features and endpoints
 
-- Create courses with a title and optional description.
-- List all available courses.
-- Enroll an existing student in an existing course.
-- Prevent duplicate enrollment in the same course.
-- List the courses associated with a student.
-- Cancel an enrollment without deleting the student or course.
-- Validate request data and log requests and errors.
-- Explore and test the API through Swagger UI.
+| Method | Path | Successful result |
+|---|---|---|
+| POST | `/courses` | 201, created course |
+| GET | `/courses` | 200, list of courses |
+| POST | `/enroll` | 201, enrollment record |
+| GET | `/students/{student_id}/courses` | 200, student's courses |
+| DELETE | `/enroll/{enrollment_id}` | 200, cancellation confirmation |
 
-## Technology
+The API uses normal Python `def` functions, Pydantic validation, `.env` settings, Supabase queries, try/except, and logging. Data persists in the database across server restarts.
 
-| Package | Purpose |
-|---|---|
-| FastAPI | Defines HTTP endpoints and generates interactive API documentation |
-| Pydantic | Validates request data and defines response structures |
-| Uvicorn | Runs the application as a web server |
-| HTTPX | Supports HTTP requests made by the automated test client |
+## Installation and database setup
 
-Python 3.10 or newer is required. All package versions are listed in
-`requirements.txt`. The application uses Python dictionaries for in-memory storage.
+Requires Python 3.10+ and a Supabase project. Use a dedicated project with no existing `student`, `courses`, or `enrollments` tables. The setup intentionally refuses to overwrite existing tables.
 
-## Installation and execution
-
-Open a terminal in the project directory containing `main.py`.
-
-### macOS / Linux
+1. In your Supabase project's SQL Editor, paste and run [schema.sql](schema.sql) once. It creates the tables and three fictional students. Note the returned student IDs.
+2. In the project directory, create/activate a Python environment and install the single dependency file:
 
 ```bash
 python3 -m venv .venv
+```
+
+```bash
 source .venv/bin/activate
+```
+
+```bash
 python -m pip install -r requirements.txt
+```
+
+3. Create a local `.env` using `.env.example` as the template. The prepared local folder already has a blank `.env`; fill it rather than overwriting it. For a fresh clone, copy without overwriting:
+
+```bash
+cp -n .env.example .env
+```
+
+Set `SUPABASE_URL` to your project URL and `SUPABASE_KEY` to its **server-side service_role key**. The table setup enables row-level security without public policies, so an anonymous key is not sufficient. Never put this backend credential in browser code, GitHub, logs, or the video. No real credentials are included in the project.
+
+`load_dotenv` loads this project's file. Exported environment values take priority; restart after editing settings. The client is created when first needed and reused. Missing configuration returns 503 while Swagger documentation remains available.
+
+4. Start the server:
+
+```bash
 python -m uvicorn main:app --reload
 ```
 
-### Windows PowerShell
+Open [Swagger UI](http://127.0.0.1:8000/docs). Click a route, **Try it out**, fill its inputs, and **Execute**.
 
-```powershell
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-python -m uvicorn main:app --reload
+## Request and response examples
+
+Create a course with POST `/courses`:
+
+```json
+{"title":"Python Basics","description":"Learn Python fundamentals"}
 ```
 
-Open [Swagger UI](http://127.0.0.1:8000/docs) in a browser. Select an endpoint,
-click **Try it out**, enter the required input, and click **Execute**. The page
-shows the response status and JSON body.
+Expected 201, with an ID assigned by PostgreSQL:
 
-`main:app` identifies the `app` object in `main.py`. The `--reload` option restarts
-the server when source files change. Stop the server with `Ctrl+C`.
+```json
+{"title":"Python Basics","description":"Learn Python fundamentals","id":1}
+```
 
-## Project structure
+`title` must be nonblank and at most 100 characters. `description` is optional, defaults to an empty string, and is limited to 500 characters. Surrounding spaces are trimmed. Extra fields, including a supplied course ID, are rejected.
 
-| File | Responsibility |
+GET `/courses` returns an array of course objects. No courses means `[]` with 200.
+
+Enroll with POST `/enroll`, using the actual student and course IDs:
+
+```json
+{"student_id":1,"course_id":1}
+```
+
+Expected 201:
+
+```json
+{"student_id":1,"course_id":1,"id":1}
+```
+
+Both IDs must be positive JSON integers. Missing/null values, strings such as `"1"`, booleans, fractional IDs, and extra fields are rejected with 422. The student and course must exist. Repeating the same pair returns 409. Different students may enroll in the same course, and a student may enroll in multiple courses.
+
+GET `/students/1/courses` returns course objects, not enrollment objects. An existing student without enrollments receives `[]`; a missing student receives 404.
+
+DELETE `/enroll/1` uses the **enrollment ID returned by POST /enroll**, not the course or student ID. Expected 200:
+
+```json
+{"message":"Enrollment cancelled","enrollment_id":1}
+```
+
+Only the enrollment is removed. The student and course remain. A second delete returns 404. The student may enroll again afterward; database-generated IDs can have gaps and should never be assumed from request counts.
+
+## Architecture and class concepts
+
+| File | Purpose |
 |---|---|
-| `main.py` | API routes, operation logging, and HTTP error handling |
-| `models.py` | Request and response models with validation rules |
-| `store.py` | In-memory records and enrollment business rules |
-| `test_api.py` | Automated API tests |
-| `requirements.txt` | Dependencies for running the application and tests |
-| `git_workflow.sh` | Step-by-step Git command reference |
-| `.gitignore` | Excludes virtual environments, caches, and local generated files |
+| main.py | Five route functions, record checks, and HTTP error handling |
+| models.py | Request/response models and validation rules |
+| database.py | `.env` loading and Supabase client creation |
+| schema.sql | Tables, constraints, security settings, and sample students |
+| test_api.py | Offline route tests using the real Supabase SDK with mocked HTTP |
+| DEMO_GUIDE.md | Ordered Swagger/video walkthrough |
+| git_workflow.sh | Commands to copy one at a time for the existing repository |
 
-## API concepts
+An **API** lets a client program send requests to a server. An **endpoint** is an HTTP method and path. **JSON** is the structured request/response format. A **path parameter** is a value in the URL, such as the student ID. FastAPI maps each route decorator to a function; Uvicorn runs the HTTP server.
 
-An **endpoint** combines an HTTP method and a URL path, such as `POST /courses`.
-A **request body** contains data sent to the API, usually as JSON. A **path
-parameter** is a value within the URL, such as the student ID in
-`/students/1/courses`. A **status code** indicates whether a request succeeded or
-why it failed.
+A **Pydantic model** defines data fields and validation rules. `Field` defines limits. `response_model` describes the returned JSON. `model_dump()` converts validated data into a dictionary for Supabase; it is the current Pydantic equivalent of `.dict()` in the class example.
 
-JSON represents structured data using objects (`{}`), arrays (`[]`), strings,
-numbers, booleans, and null. FastAPI validates incoming data using the Pydantic
-models before calling an endpoint function.
+Supabase provides a PostgreSQL database and an API for accessing it. The code follows the class pattern `client.table(...).select/insert/delete(...).eq(...).execute()`. `eq` filters by equality; `execute` sends the request; `response.data` contains the returned records. `Depends(get_client)` asks FastAPI to supply the shared database client. `lru_cache(maxsize=1)` retains that client so it is not constructed for every request.
 
-## Data and enrollment rules
+A **primary key** uniquely identifies a row. A **foreign key** connects an enrollment to a real student/course and prevents invalid references. The **unique constraint** on `(student_id, course_id)` prevents duplicate pairs, including simultaneous inserts. An application-only check could miss a concurrent request, so PostgreSQL enforces this rule. `23505` is the database error code for a unique violation; it becomes HTTP 409. The class's login example also catches database uniqueness errors.
 
-The application starts with three predefined students:
+The application checks student/course existence for descriptive 404 responses before inserting. A foreign-key failure after those checks also becomes 404, covering deletion by another database client between requests. The course-list query uses the foreign-key relationship to fetch related course objects in one query.
 
-| Student ID | Name |
+A **try/except** block catches failures. `HTTPException` creates a deliberate JSON error response. The error helper preserves these responses and maps database failures to useful status codes. The logger records operation outcomes and error types/codes without logging secrets. It does not log raw database error messages.
+
+This project uses the supplied `supabaseapi.py` CRUD style and `login.py`'s environment/error-handling concepts. Login/JWT is not required for this enrollment assignment and is not added. CORS and rate limiting are also unnecessary for the local Swagger demonstration.
+
+## Errors
+
+| Code | Meaning |
 |---|---|
-| 1 | Asha |
-| 2 | Ben |
-| 3 | Chen |
+| 404 | Student, course, or enrollment does not exist |
+| 409 | Student is already enrolled in the course |
+| 422 | Invalid request fields or nonpositive/noninteger path ID |
+| 503 | Missing configuration, missing database tables, connection failure, or database access failure |
+| 500 | Unexpected application failure |
 
-Courses and enrollments are initially empty. Course IDs and enrollment IDs are
-assigned automatically, starting at 1. These identify different record types:
-**cancellation requires the enrollment ID returned by `POST /enroll`.**
+If a 503 mentions missing tables, run the SQL in the correct project. If a database request fails, confirm the server-side key, table names, and project URL. If tables already exist, inspect their definitions before deciding on a migration; do not delete class data to make setup succeed.
 
-- A student may enroll in multiple courses.
-- A course may have multiple students.
-- The same student-course pair may exist only once at a time.
-- Different courses may share a title; their IDs distinguish them.
-- Cancellation removes the enrollment relationship only.
-- A student can enroll again after cancellation and receives a new enrollment ID.
-- A known student with no enrollments receives an empty list; an unknown student
-  receives a `404` error.
-
-## Endpoints
-
-| Method | Path | Operation | Success |
-|---|---|---|---|
-| POST | `/courses` | Create a course | 201 Created |
-| GET | `/courses` | List all courses | 200 OK |
-| POST | `/enroll` | Enroll a student | 201 Created |
-| GET | `/students/{student_id}/courses` | List a student's courses | 200 OK |
-| DELETE | `/enroll/{enrollment_id}` | Cancel an enrollment | 200 OK |
-
-The examples below form a sequence starting with an empty course catalog.
-
-### 1. Create a course
-
-**POST `/courses`**
-
-Request body:
-
-```json
-{
-  "title": "Python Basics",
-  "description": "Learn Python fundamentals"
-}
-```
-
-Response — **201 Created**:
-
-```json
-{
-  "title": "Python Basics",
-  "description": "Learn Python fundamentals",
-  "id": 1
-}
-```
-
-### 2. List courses
-
-**GET `/courses`** — no request body.
-
-Response — **200 OK**:
-
-```json
-[
-  {
-    "title": "Python Basics",
-    "description": "Learn Python fundamentals",
-    "id": 1
-  }
-]
-```
-
-An empty catalog returns `[]`.
-
-### 3. Enroll a student
-
-**POST `/enroll`**
-
-Request body:
-
-```json
-{
-  "student_id": 1,
-  "course_id": 1
-}
-```
-
-Response — **201 Created**:
-
-```json
-{
-  "student_id": 1,
-  "course_id": 1,
-  "id": 1
-}
-```
-
-Here, `id` is the new enrollment ID. Repeating the same request returns **409
-Conflict**:
-
-```json
-{
-  "detail": "Student is already enrolled in this course"
-}
-```
-
-### 4. List a student's courses
-
-**GET `/students/1/courses`** — no request body.
-
-Response — **200 OK**:
-
-```json
-[
-  {
-    "title": "Python Basics",
-    "description": "Learn Python fundamentals",
-    "id": 1
-  }
-]
-```
-
-### 5. Cancel an enrollment
-
-**DELETE `/enroll/1`** — no request body.
-
-Response — **200 OK**:
-
-```json
-{
-  "message": "Enrollment cancelled",
-  "enrollment_id": 1
-}
-```
-
-After cancellation, `GET /students/1/courses` returns `[]`, while `GET /courses`
-still contains the course. Repeating the cancellation returns **404 Not Found**:
-
-```json
-{
-  "detail": "Enrollment 1 not found"
-}
-```
-
-## Validation and error responses
-
-| Condition | Status | Response detail |
-|---|---|---|
-| Student does not exist | 404 | `Student 99 not found`, for example |
-| Course does not exist | 404 | `Course 99 not found`, for example |
-| Enrollment does not exist | 404 | `Enrollment 99 not found`, for example |
-| Duplicate student-course pair | 409 | `Student is already enrolled in this course` |
-| Invalid request body or path ID | 422 | A list identifying the invalid fields |
-| Unsupported HTTP method | 405 | `Method Not Allowed` |
-| Unexpected application failure | 500 | `Internal server error` |
-
-Course titles must contain 1–100 characters after surrounding whitespace is
-removed. Descriptions are optional, default to an empty string, and allow up to
-500 characters. Unknown body fields are rejected.
-
-Enrollment body IDs must be positive JSON integers. Values such as `0`, `-1`,
-`true`, `"1"`, `1.5`, and `null` are rejected. Path IDs are parsed from URL text
-and must also be positive integers.
-
-For enrollment requests, the student is checked before the course. If both are
-missing, the response reports the missing student first. Rejected requests do
-not create records or consume IDs.
-
-## Application design
-
-```text
-Client request
-    -> FastAPI input validation
-    -> Endpoint function in main.py
-    -> EnrollmentStore business rules
-    -> Response model or HTTP error
-    -> JSON response
-```
-
-`models.py` defines the accepted fields and validation rules. `main.py` maps each
-HTTP method and path to a small function. These functions call `EnrollmentStore`
-methods in `store.py`, keeping the business rules separate from HTTP handling.
-
-Enrollment follows four steps: check the student, check the course, check for an
-existing pair, then save the new relationship. A lock protects these checks and
-the write so simultaneous requests cannot create duplicate enrollments within
-the same server process.
-
-Each endpoint uses a regular `def` function with a `try/except` block. The `try`
-block calls the store method, logs the result, and returns it. If the operation
-fails, the `except` block calls the shared `handle_error` function.
-
-`handle_error` logs expected business failures and raises `HTTPException` with
-`404` or `409`. For unexpected failures, it logs the traceback and raises a
-`500` error with a generic message. FastAPI converts `HTTPException` into a JSON
-response. This keeps the same error rules in one small function.
-
-Input validation occurs before an endpoint runs. FastAPI handles invalid input
-with `422`, unknown routes with `404`, and unsupported methods with `405`.
-`Path(..., gt=0)` declares a required positive integer in the URL.
-
-Logs appear in the server terminal. Application `INFO` messages record successful
-operations, `WARNING` messages record business-rule rejections, and `ERROR`
-messages capture unexpected failures. Uvicorn's access log also records HTTP
-requests and status codes, including validation failures.
-
-## Testing
-
-With the virtual environment activated, run:
+## Testing and scope
 
 ```bash
 python -m unittest -v test_api
 ```
 
-The test suite contains **18 tests** covering successful requests, invalid
-inputs, missing records, duplicate prevention, cancellation, re-enrollment,
-concurrent enrollment requests, logging, unexpected failures, and API documentation.
-Each test uses a fresh store and does not modify a separately running server.
+The 13 offline tests cover all endpoints, validation, missing records, duplicate-error handling, and failure responses. They use the actual Supabase query builder with a mocked HTTP transport: no real credentials or database are needed. **They do not prove the hosted schema, permissions, or concurrency behavior have been deployed.** See [VALIDATION.md](VALIDATION.md).
 
-Successful execution ends with `Ran 18 tests` and `OK`.
+The application is a local assignment demonstration without user authentication. Use fictional records; do not expose the backend publicly with unrestricted write access. Supabase's configured API row limit applies to list responses; pagination is outside this small assignment. Student creation is done through the supplied SQL setup, not an extra endpoint.
 
-## Limitations
+## Submission
 
-- Data exists only in memory and resets when the server restarts or reloads.
-- The application supports one server process; multiple workers would have
-  separate data stores.
-- Students are predefined; there is no student-registration endpoint.
-- Authentication, persistent storage, and production deployment are outside
-  the scope of this application.
+Use [DEMO_GUIDE.md](DEMO_GUIDE.md) to demonstrate every API and explain the validation/database logic. Follow [git_workflow.sh](git_workflow.sh) to commit and publish from the existing repository. Submit the actual GitHub repository URL and YouTube video URL.
 
 ## References
 
-- [FastAPI request bodies](https://fastapi.tiangolo.com/tutorial/body/)
-- [FastAPI error handling](https://fastapi.tiangolo.com/tutorial/handling-errors/)
-- [FastAPI testing](https://fastapi.tiangolo.com/tutorial/testing/)
-- [Python logging](https://docs.python.org/3/howto/logging.html)
+- [Supabase Python inserts](https://supabase.com/docs/reference/python/insert)
+- [Supabase Python queries and relationships](https://supabase.com/docs/reference/python/select)
+- [PostgreSQL unique and foreign-key constraints](https://www.postgresql.org/docs/current/ddl-constraints.html)
